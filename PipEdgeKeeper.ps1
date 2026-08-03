@@ -23,6 +23,9 @@ param(
         'chrome', 'vivaldi', 'msedge', 'brave', 'chromium', 'opera', 'opera_gx'
     ),
 
+    # Run without a console and expose an Exit command in the notification area.
+    [switch]$TrayIcon,
+
     [Parameter(DontShow)]
     [switch]$Once
 )
@@ -217,6 +220,63 @@ function Enable-DpiAwareness {
     }
 }
 
+function New-SingleInstanceMutex {
+    $createdNew = $false
+    $mutex = [System.Threading.Mutex]::new(
+        $true,
+        'Local\PipEdgeKeeper',
+        [ref]$createdNew
+    )
+
+    if (-not $createdNew) {
+        $mutex.Dispose()
+        return $null
+    }
+
+    return $mutex
+}
+
+function New-TrayResources {
+    Add-Type -AssemblyName System.Drawing
+    Add-Type -AssemblyName System.Windows.Forms
+
+    $menu = [System.Windows.Forms.ContextMenuStrip]::new()
+    $exitItem = [System.Windows.Forms.ToolStripMenuItem]::new('Exit')
+    [void]$menu.Items.Add($exitItem)
+
+    $notificationIcon = [System.Windows.Forms.NotifyIcon]::new()
+    $notificationIcon.ContextMenuStrip = $menu
+    $notificationIcon.Icon = [System.Drawing.SystemIcons]::Application
+    $notificationIcon.Text = 'Chromium PiP Edge Keeper'
+
+    $exitItem.add_Click({
+        $script:stopRequested = $true
+    })
+
+    $notificationIcon.Visible = $true
+    $notificationIcon.ShowBalloonTip(
+        2000,
+        'PiP Edge Keeper',
+        'Running in the background. Right-click the tray icon to exit.',
+        [System.Windows.Forms.ToolTipIcon]::Info
+    )
+
+    return @{
+        Icon = $notificationIcon
+        Menu = $menu
+    }
+}
+
+function Remove-TrayResources([hashtable]$Resources) {
+    if ($null -eq $Resources) {
+        return
+    }
+
+    $Resources.Icon.Visible = $false
+    $Resources.Icon.Dispose()
+    $Resources.Menu.Dispose()
+}
+
 if (-not (Enable-DpiAwareness)) {
     Write-Warning 'Windows did not accept a DPI-awareness request. Edge placement may be less accurate across monitors with different scaling.'
 }
@@ -345,14 +405,28 @@ function Get-AnchorSummary([hashtable]$State) {
     )
 }
 
-Write-Host 'PiP edge keeper is running. Place a PiP window within' $SnapDistance 'px of an edge.'
-if ($UseMonitorBounds) {
-    Write-Host 'Using physical monitor edges; a bottom PiP may overlap the taskbar.'
-} else {
-    Write-Host 'Using monitor work-area edges; the taskbar is excluded.'
-}
-Write-Host 'Press Ctrl+C in this window to stop.'
+$script:stopRequested = $false
+$instanceMutex = $null
+$trayResources = $null
 
+if ($TrayIcon) {
+    $instanceMutex = New-SingleInstanceMutex
+    if ($null -eq $instanceMutex) {
+        Write-Verbose 'PiP Edge Keeper is already running.'
+        return
+    }
+    $trayResources = New-TrayResources
+} else {
+    Write-Host 'PiP edge keeper is running. Place a PiP window within' $SnapDistance 'px of an edge.'
+    if ($UseMonitorBounds) {
+        Write-Host 'Using physical monitor edges; a bottom PiP may overlap the taskbar.'
+    } else {
+        Write-Host 'Using monitor work-area edges; the taskbar is excluded.'
+    }
+    Write-Host 'Press Ctrl+C in this window to stop.'
+}
+
+try {
 do {
     $moveSizeWindow = [PipEdge.NativeMethods]::GetMoveSizeWindow()
     $seenHandles = [System.Collections.Generic.HashSet[long]]::new()
@@ -442,7 +516,18 @@ do {
         }
     }
 
-    if (-not $Once) {
+    if ($TrayIcon) {
+        [System.Windows.Forms.Application]::DoEvents()
+    }
+
+    if (-not $Once -and -not $script:stopRequested) {
         Start-Sleep -Milliseconds $PollMilliseconds
     }
-} while (-not $Once)
+} while (-not $Once -and -not $script:stopRequested)
+} finally {
+    Remove-TrayResources $trayResources
+    if ($null -ne $instanceMutex) {
+        $instanceMutex.ReleaseMutex()
+        $instanceMutex.Dispose()
+    }
+}

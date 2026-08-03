@@ -9,7 +9,10 @@ screen edge when autoplay or media updates move them inward.
 
 1. Double-click `Start-PipEdgeKeeper.cmd`.
 2. Place the PiP window within 64 pixels of an edge or corner.
-3. Leave the helper running. Press Ctrl+C in its window to stop it.
+3. Right-click its notification-area icon and choose **Exit** when finished.
+
+The launcher runs silently in the background and prevents duplicate instances.
+Run `PipEdgeKeeper.ps1` directly if you want a visible console for debugging.
 
 The launcher snaps to the physical monitor edge, so a bottom-anchored PiP can
 overlap the taskbar. To stop at the top of the taskbar instead, run

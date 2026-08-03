@@ -1,4 +1,4 @@
-name: Test
+name: Build and test
 
 on:
   push:
@@ -8,10 +8,19 @@ permissions:
   contents: read
 
 jobs:
-  powershell:
+  windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
       - name: Run placement tests
         shell: powershell
-        run: .\tests\PipEdgeKeeper.Tests.ps1
+        run: .\tests\run-tests.ps1
+      - name: Build tray application
+        shell: powershell
+        run: .\build.ps1
+      - name: Upload Windows executable
+        uses: actions/upload-artifact@v7
+        with:
+          name: PipEdgeKeeper-windows
+          path: dist/PipEdgeKeeper.exe
+          if-no-files-found: error

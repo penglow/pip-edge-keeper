@@ -1,0 +1,19 @@
+Chrome Version: [paste exact value from chrome://version]
+OS: Windows 11 build 26200, 2560x1440 display, 2560x1392 work area, 100% scaling
+
+What steps will reproduce the problem?
+(1) Open any video in video Picture-in-Picture.
+(2) Move the PiP window flush with the bottom-right edge of the work area.
+(3) Let autoplay advance or switch to any other video. Repeat, then compare with top-left placement.
+What is the expected result?
+The PiP window should preserve its right and bottom edge gaps when Chromium updates its bounds.
+A window positioned away from an edge should retain its existing origin.
+
+What happens instead?
+A normal video transition pulls the PiP window inward from the right and bottom edges regardless of the videos' dimensions or aspect ratios.
+The gap can accumulate over repeated transitions. Top-left placement remains stable.
+Additional information:
+The symptom is user-observed in Chrome and Vivaldi 8.1.4087.55.
+In one controlled Electron-host Chromium run, a transition moved a 494x278 PiP from flush bottom-right (2066,1114) to (2035,1083), leaving a 31 px gap. This is one measured example, not a size-specific condition; the exact measurement was not collected in native Chrome.
+origin.SetToMin(default_origin) appears to apply the initial-placement inset to an existing window: https://chromium.googlesource.com/chromium/src/+/db5418d8949a4f526a732fcf2aa8158759cf1ee3/chrome/browser/ui/views/overlay/video_overlay_window_views.cc#524
+Issue 40887946 overlaps bottom-right placement and shared bounds logic, but its reported path is initial Document PiP creation rather than an already-visible video PiP media update. Please merge if maintainers consider the root cause identical.

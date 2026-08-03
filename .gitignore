@@ -1,0 +1,6 @@
+# Local archives and editor/OS metadata
+*.zip
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

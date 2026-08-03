@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-$scriptPath = Join-Path $PSScriptRoot '..\Keep-PipAtEdge.ps1'
+$scriptPath = Join-Path $PSScriptRoot '..\PipEdgeKeeper.ps1'
 
 . $scriptPath -Once 6>$null
 
@@ -153,7 +153,23 @@ try {
 }
 
 $launcherText = Get-Content -LiteralPath (Join-Path $PSScriptRoot '..\Start-PipEdgeKeeper.cmd') -Raw
+Assert-Equal $true ($launcherText -match '-WindowStyle Hidden') 'CMD hides the PowerShell window.'
+Assert-Equal $true ($launcherText -match '-Sta') 'CMD uses the WinForms-compatible apartment state.'
+Assert-Equal $true ($launcherText -match '-TrayIcon') 'CMD enables the notification-area icon.'
 Assert-Equal $true ($launcherText -match '-SnapDistance 64\s+-FlushEdges\s+-UseMonitorBounds') 'CMD enables physical-screen flush mode.'
+
+# Tray mode permits only one background instance.
+$firstMutex = New-SingleInstanceMutex
+try {
+    Assert-Equal $true ($null -ne $firstMutex) 'First tray instance acquires the mutex.'
+    $secondMutex = New-SingleInstanceMutex
+    Assert-Equal $true ($null -eq $secondMutex) 'Second tray instance is rejected.'
+} finally {
+    if ($null -ne $firstMutex) {
+        $firstMutex.ReleaseMutex()
+        $firstMutex.Dispose()
+    }
+}
 
 # Work-area bottom is the taskbar top; monitor bottom is the physical screen
 # edge. The CMD mode must deliberately use the latter.

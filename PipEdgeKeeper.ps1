@@ -1,3 +1,4 @@
+[CmdletBinding()]
 param(
     [ValidateRange(0, 100)]
     [int]$SnapDistance = 20,
@@ -17,12 +18,16 @@ param(
     # tab title merely mentions Picture-in-Picture is never repositioned.
     [string]$TitlePattern = '(?i)^\s*picture[\s-]*in[\s-]*picture\s*$',
 
-    [string[]]$BrowserProcess = @(
+    [Alias('BrowserProcess')]
+    [string[]]$BrowserProcesses = @(
         'chrome', 'vivaldi', 'msedge', 'brave', 'chromium', 'opera', 'opera_gx'
     ),
 
-    [switch]$Once,
-    [switch]$VerboseEvents
+    # Run without a console and expose an Exit command in the notification area.
+    [switch]$TrayIcon,
+
+    [Parameter(DontShow)]
+    [switch]$Once
 )
 
 Set-StrictMode -Version Latest
@@ -191,58 +196,109 @@ namespace PipEdge {
 '@
 }
 
-# Request PER_MONITOR_AWARE_V2. Windows can reject a process-wide change if the
-# host initialized DPI awareness before loading this script, so fall back to a
-# thread-level context for the thread performing all Win32 coordinate calls.
-$dpiAwarenessSet = $false
-try {
-    $dpiAwarenessSet = [PipEdge.NativeMethods]::SetProcessDpiAwarenessContext(
-        [IntPtr](-4)
-    )
-} catch { }
-
-if (-not $dpiAwarenessSet) {
+function Enable-DpiAwareness {
+    # Windows may reject a process-wide change after PowerShell initializes, so
+    # try per-monitor-v2 at the thread level before using the legacy fallback.
     try {
-        $previousDpiContext =
+        if ([PipEdge.NativeMethods]::SetProcessDpiAwarenessContext([IntPtr](-4))) {
+            return $true
+        }
+    } catch { }
+
+    try {
+        $previousContext =
             [PipEdge.NativeMethods]::SetThreadDpiAwarenessContext([IntPtr](-4))
-        $dpiAwarenessSet = $previousDpiContext -ne [IntPtr]::Zero
+        if ($previousContext -ne [IntPtr]::Zero) {
+            return $true
+        }
     } catch { }
-}
 
-if (-not $dpiAwarenessSet) {
     try {
-        $dpiAwarenessSet = [PipEdge.NativeMethods]::SetProcessDPIAware()
-    } catch { }
-}
-
-if (-not $dpiAwarenessSet) {
-    Write-Warning 'Windows did not accept a DPI-awareness request. Edge placement may be less accurate across monitors with different scaling.'
-}
-
-$browserNames = [System.Collections.Generic.HashSet[string]]::new(
-    [string[]]$BrowserProcess,
-    [System.StringComparer]::OrdinalIgnoreCase
-)
-$tracked = @{}
-$moveFlags = [PipEdge.NativeMethods]::NoSize -bor
-             [PipEdge.NativeMethods]::NoZOrder -bor
-             [PipEdge.NativeMethods]::NoActivate -bor
-             [PipEdge.NativeMethods]::AsyncWindowPos
-
-function Write-Event([string]$Message) {
-    if ($VerboseEvents) {
-        Write-Host "[$(Get-Date -Format 'HH:mm:ss.fff')] $Message"
+        return [PipEdge.NativeMethods]::SetProcessDPIAware()
+    } catch {
+        return $false
     }
 }
 
-function Get-PlacementArea($Window) {
+function New-SingleInstanceMutex {
+    $createdNew = $false
+    $mutex = [System.Threading.Mutex]::new(
+        $true,
+        'Local\PipEdgeKeeper',
+        [ref]$createdNew
+    )
+
+    if (-not $createdNew) {
+        $mutex.Dispose()
+        return $null
+    }
+
+    return $mutex
+}
+
+function New-TrayResources {
+    Add-Type -AssemblyName System.Drawing
+    Add-Type -AssemblyName System.Windows.Forms
+
+    $menu = [System.Windows.Forms.ContextMenuStrip]::new()
+    $exitItem = [System.Windows.Forms.ToolStripMenuItem]::new('Exit')
+    [void]$menu.Items.Add($exitItem)
+
+    $notificationIcon = [System.Windows.Forms.NotifyIcon]::new()
+    $notificationIcon.ContextMenuStrip = $menu
+    $notificationIcon.Icon = [System.Drawing.SystemIcons]::Application
+    $notificationIcon.Text = 'Chromium PiP Edge Keeper'
+
+    $exitItem.add_Click({
+        $script:stopRequested = $true
+    })
+
+    $notificationIcon.Visible = $true
+    $notificationIcon.ShowBalloonTip(
+        2000,
+        'PiP Edge Keeper',
+        'Running in the background. Right-click the tray icon to exit.',
+        [System.Windows.Forms.ToolTipIcon]::Info
+    )
+
+    return @{
+        Icon = $notificationIcon
+        Menu = $menu
+    }
+}
+
+function Remove-TrayResources([hashtable]$Resources) {
+    if ($null -eq $Resources) {
+        return
+    }
+
+    $Resources.Icon.Visible = $false
+    $Resources.Icon.Dispose()
+    $Resources.Menu.Dispose()
+}
+
+if (-not (Enable-DpiAwareness)) {
+    Write-Warning 'Windows did not accept a DPI-awareness request. Edge placement may be less accurate across monitors with different scaling.'
+}
+
+$browserProcessNames = [System.Collections.Generic.HashSet[string]]::new(
+    [string[]]$BrowserProcesses,
+    [System.StringComparer]::OrdinalIgnoreCase
+)
+$trackedWindows = @{}
+$setWindowPositionFlags = [PipEdge.NativeMethods]::NoSize -bor
+                          [PipEdge.NativeMethods]::NoZOrder -bor
+                          [PipEdge.NativeMethods]::NoActivate -bor
+                          [PipEdge.NativeMethods]::AsyncWindowPos
+
+function Get-PlacementArea([PipEdge.WindowInfo]$Window) {
     if ($UseMonitorBounds) {
         return $Window.MonitorBounds
     }
     return $Window.WorkArea
 }
 
-function Get-EdgeState($Window) {
+function Get-EdgeState([PipEdge.WindowInfo]$Window) {
     $bounds = $Window.Bounds
     $placementArea = Get-PlacementArea $Window
     $leftGap = $bounds.Left - $placementArea.Left
@@ -275,24 +331,26 @@ function Get-EdgeState($Window) {
         RightGap = $rememberedRightGap
         TopGap = $rememberedTopGap
         BottomGap = $rememberedBottomGap
-        LastLeft = $bounds.Left
-        LastTop = $bounds.Top
-        LastWidth = $bounds.Width
-        LastHeight = $bounds.Height
         Interacting = $false
         Title = $Window.Title
         ProcessId = $Window.ProcessId
     }
 }
 
-function Update-EdgeState($State, $Window) {
+function Update-EdgeState(
+    [hashtable]$State,
+    [PipEdge.WindowInfo]$Window
+) {
     $newState = Get-EdgeState $Window
     foreach ($key in $newState.Keys) {
         $State[$key] = $newState[$key]
     }
 }
 
-function Add-MissingEdgeAnchors($State, $Window) {
+function Add-MissingEdgeAnchors(
+    [hashtable]$State,
+    [PipEdge.WindowInfo]$Window
+) {
     $candidate = Get-EdgeState $Window
     $added = $false
     foreach ($edge in @('Left', 'Right', 'Top', 'Bottom')) {
@@ -306,12 +364,18 @@ function Add-MissingEdgeAnchors($State, $Window) {
     return $added
 }
 
-function Test-NativeMoveSizeInteraction($Window, [IntPtr]$MoveSizeWindow) {
+function Test-NativeMoveSizeInteraction(
+    [PipEdge.WindowInfo]$Window,
+    [IntPtr]$MoveSizeWindow
+) {
     return $MoveSizeWindow -ne [IntPtr]::Zero -and
            $MoveSizeWindow -eq $Window.Handle
 }
 
-function Get-DesiredOrigin($State, $Window) {
+function Get-DesiredOrigin(
+    [hashtable]$State,
+    [PipEdge.WindowInfo]$Window
+) {
     $origin = [PipEdge.Point]::new()
     $origin.X = $Window.Bounds.Left
     $origin.Y = $Window.Bounds.Top
@@ -332,17 +396,40 @@ function Get-DesiredOrigin($State, $Window) {
     return $origin
 }
 
-Write-Host 'PiP edge keeper is running. Place a PiP window within' $SnapDistance 'px of an edge.'
-if ($UseMonitorBounds) {
-    Write-Host 'Using physical monitor edges; a bottom PiP may overlap the taskbar.'
-} else {
-    Write-Host 'Using monitor work-area edges; the taskbar is excluded.'
+function Get-AnchorSummary([hashtable]$State) {
+    return 'L={0} R={1} T={2} B={3}' -f @(
+        $State.Left,
+        $State.Right,
+        $State.Top,
+        $State.Bottom
+    )
 }
-Write-Host 'Press Ctrl+C in this window to stop.'
 
+$script:stopRequested = $false
+$instanceMutex = $null
+$trayResources = $null
+
+if ($TrayIcon) {
+    $instanceMutex = New-SingleInstanceMutex
+    if ($null -eq $instanceMutex) {
+        Write-Verbose 'PiP Edge Keeper is already running.'
+        return
+    }
+    $trayResources = New-TrayResources
+} else {
+    Write-Host 'PiP edge keeper is running. Place a PiP window within' $SnapDistance 'px of an edge.'
+    if ($UseMonitorBounds) {
+        Write-Host 'Using physical monitor edges; a bottom PiP may overlap the taskbar.'
+    } else {
+        Write-Host 'Using monitor work-area edges; the taskbar is excluded.'
+    }
+    Write-Host 'Press Ctrl+C in this window to stop.'
+}
+
+try {
 do {
     $moveSizeWindow = [PipEdge.NativeMethods]::GetMoveSizeWindow()
-    $seen = [System.Collections.Generic.HashSet[string]]::new()
+    $seenHandles = [System.Collections.Generic.HashSet[long]]::new()
 
     foreach ($window in [PipEdge.NativeMethods]::GetTopLevelWindows()) {
         if ($window.Title -notmatch $TitlePattern) {
@@ -355,31 +442,32 @@ do {
             continue
         }
 
-        if (-not $browserNames.Contains($processName)) {
+        if (-not $browserProcessNames.Contains($processName)) {
             continue
         }
 
-        $key = $window.Handle.ToInt64().ToString()
-        [void]$seen.Add($key)
+        $handle = $window.Handle.ToInt64()
+        [void]$seenHandles.Add($handle)
 
-        if ($tracked.ContainsKey($key) -and
-            ($tracked[$key].ProcessId -ne $window.ProcessId -or
-             $tracked[$key].Title -ne $window.Title)) {
+        if ($trackedWindows.ContainsKey($handle) -and
+            ($trackedWindows[$handle].ProcessId -ne $window.ProcessId -or
+             $trackedWindows[$handle].Title -ne $window.Title)) {
             # A native handle can be reused after its old window closes. Never
             # apply placement state captured for a different window identity.
-            [void]$tracked.Remove($key)
+            [void]$trackedWindows.Remove($handle)
         }
 
-        if (-not $tracked.ContainsKey($key)) {
-            $tracked[$key] = Get-EdgeState $window
+        if (-not $trackedWindows.ContainsKey($handle)) {
+            $trackedWindows[$handle] = Get-EdgeState $window
             if ($moveSizeWindow -eq $window.Handle) {
-                $tracked[$key].Interacting = $true
+                $trackedWindows[$handle].Interacting = $true
             }
-            Write-Event "Tracking '$($window.Title)' ($processName); anchors: L=$($tracked[$key].Left) R=$($tracked[$key].Right) T=$($tracked[$key].Top) B=$($tracked[$key].Bottom)"
+            $summary = Get-AnchorSummary $trackedWindows[$handle]
+            Write-Verbose "Tracking '$($window.Title)' ($processName); anchors: $summary"
             continue
         }
 
-        $state = $tracked[$key]
+        $state = $trackedWindows[$handle]
 
         # Only adopt new placement after Windows confirms a native move/size
         # loop. A media-control click can coincide with Chromium changing the
@@ -389,21 +477,17 @@ do {
 
         if ($isUserInteraction) {
             $state.Interacting = $true
-            $state.LastLeft = $window.Bounds.Left
-            $state.LastTop = $window.Bounds.Top
-            $state.LastWidth = $window.Bounds.Width
-            $state.LastHeight = $window.Bounds.Height
             continue
         }
 
         if ($state.Interacting) {
             Update-EdgeState $state $window
-            Write-Event "Placement updated; anchors: L=$($state.Left) R=$($state.Right) T=$($state.Top) B=$($state.Bottom)"
+            Write-Verbose "Placement updated; anchors: $(Get-AnchorSummary $state)"
             continue
         }
 
         if (Add-MissingEdgeAnchors $state $window) {
-            Write-Event "Edge acquired; anchors: L=$($state.Left) R=$($state.Right) T=$($state.Top) B=$($state.Bottom)"
+            Write-Verbose "Edge acquired; anchors: $(Get-AnchorSummary $state)"
         }
 
         $desiredOrigin = Get-DesiredOrigin $state $window
@@ -418,26 +502,32 @@ do {
                 $desiredTop,
                 0,
                 0,
-                $moveFlags
+                $setWindowPositionFlags
             )
             if ($moved) {
-                Write-Event "Restored edge position to ($desiredLeft, $desiredTop) after size/position change."
+                Write-Verbose "Restored edge position to ($desiredLeft, $desiredTop) after size/position change."
             }
         }
-
-        $state.LastLeft = $desiredLeft
-        $state.LastTop = $desiredTop
-        $state.LastWidth = $window.Bounds.Width
-        $state.LastHeight = $window.Bounds.Height
     }
 
-    foreach ($key in @($tracked.Keys)) {
-        if (-not $seen.Contains($key)) {
-            [void]$tracked.Remove($key)
+    foreach ($handle in @($trackedWindows.Keys)) {
+        if (-not $seenHandles.Contains($handle)) {
+            [void]$trackedWindows.Remove($handle)
         }
     }
 
-    if (-not $Once) {
+    if ($TrayIcon) {
+        [System.Windows.Forms.Application]::DoEvents()
+    }
+
+    if (-not $Once -and -not $script:stopRequested) {
         Start-Sleep -Milliseconds $PollMilliseconds
     }
-} while (-not $Once)
+} while (-not $Once -and -not $script:stopRequested)
+} finally {
+    Remove-TrayResources $trayResources
+    if ($null -ne $instanceMutex) {
+        $instanceMutex.ReleaseMutex()
+        $instanceMutex.Dispose()
+    }
+}

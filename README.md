@@ -1,50 +1,47 @@
-# Chromium PiP Edge Keeper
+# PiP Edge Keeper
 
 [![Build and test](https://github.com/penglow/pip-edge-keeper/actions/workflows/test.yml/badge.svg)](https://github.com/penglow/pip-edge-keeper/actions/workflows/test.yml)
+[![Latest release](https://img.shields.io/github/v/release/penglow/pip-edge-keeper?label=download)](https://github.com/penglow/pip-edge-keeper/releases/latest)
 
-A small Windows tray app that keeps Chromium Picture-in-Picture windows attached
-to the screen edge when autoplay or media updates move them inward.
+A tiny Windows tray app that keeps Chrome, Edge, and other Chromium
+Picture-in-Picture windows attached to the edge of your screen.
 
-## Run
+## Download and run
 
-Download the `PipEdgeKeeper-windows` artifact from the
-[latest successful build](https://github.com/penglow/pip-edge-keeper/actions/workflows/test.yml),
-extract it, and run `PipEdgeKeeper.exe`.
+1. **[Download the latest Windows version](https://github.com/penglow/pip-edge-keeper/releases/latest/download/PipEdgeKeeper-windows.zip).**
+2. Open the downloaded ZIP and extract it.
+3. Run `PipEdgeKeeper.exe`.
 
-The app has no terminal or taskbar window. It lives in the Windows notification
-area:
+There is no installer and no terminal window. The app stays in the notification
+area beside the Windows clock. If its icon is hidden, click the **^** arrow.
 
-- Double-click the icon to open settings.
-- Right-click it to pause, open settings, or exit.
-- Starting it twice does not create duplicate instances.
+## Using the app
 
-Windows may show a SmartScreen warning because the executable is not
-code-signed.
+- **Double-click the tray icon** to change settings.
+- **Right-click the tray icon** to pause, open settings, or exit.
+- Leave it running while you use Picture-in-Picture.
+
+Starting the app a second time opens the existing instance instead of creating
+a duplicate.
 
 ## Settings
 
-The settings window controls the edge recognition distance, whether recognized
-edges snap completely flush, and whether bottom PiP windows use the physical
-screen edge or stop above the taskbar.
+- **Edge recognition distance** controls how close a PiP window must be to an
+  edge before the app keeps it there.
+- **Snap completely flush** removes any small gap at a recognized edge.
+- **Bottom edge mode** chooses whether PiP windows stop above the taskbar or use
+  the physical bottom of the screen.
 
-Settings are stored in `%LOCALAPPDATA%\PipEdgeKeeper\settings.ini`.
+Settings are saved automatically in
+`%LOCALAPPDATA%\PipEdgeKeeper\settings.ini`.
 
-## Build
+## Windows warning
 
-Windows 10 or 11 includes the .NET Framework compiler used by this project:
+Windows may show an unknown-publisher or SmartScreen warning because the app is
+not code-signed. The complete source code and build process are public in this
+repository.
 
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
-```
+## For developers
 
-The executable is written to `dist\PipEdgeKeeper.exe`.
-
-## Test
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\run-tests.ps1
-```
-
-The Chromium bug analysis and deterministic reproduction page remain in
-[`docs/chromium-bug-report.md`](docs/chromium-bug-report.md) and
-[`repro/pip-drift-test.html`](repro/pip-drift-test.html).
+Building, testing, project structure, and release instructions are in
+[`DEVELOPMENT.md`](DEVELOPMENT.md).

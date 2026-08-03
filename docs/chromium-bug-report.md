@@ -42,7 +42,7 @@ more stable than the right or bottom edges.
 
 On Windows 11 (build 26200), 2560x1392 work area, 100% scaling, using a local
 test page whose video streams come from `canvas.captureStream()` (so the natural
-size is exact; the local repro page is `pip-drift-test.html` and can be served
+size is exact; the local repro page is `repro/pip-drift-test.html` and can be served
 over localhost), bounds were
 measured via `GetWindowRect` under per-monitor-v2 DPI awareness. These
 instrumented measurements were collected in an Electron-embedded Chromium host;

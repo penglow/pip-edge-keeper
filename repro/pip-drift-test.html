@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PiP drift test</title>
+  <style>
+    body {
+      max-width: 900px;
+      margin: 2rem auto;
+      padding: 0 1rem;
+      color: #eee;
+      background: #222;
+      font-family: system-ui, sans-serif;
+    }
+
+    video {
+      width: 320px;
+      max-width: 100%;
+      background: #000;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin: 1rem 0;
+    }
+
+    pre {
+      min-height: 8rem;
+      padding: 1rem;
+      overflow: auto;
+      background: #111;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>PiP drift test</h1>
+    <p>
+      Enter PiP, move the native window flush against a screen edge or corner,
+      then use the stream-swap buttons. Stream B has identical natural
+      dimensions; stream C changes resolution but not aspect ratio; stream D
+      changes aspect ratio.
+    </p>
+
+    <video id="video" autoplay muted playsinline></video>
+
+    <div class="controls">
+      <button id="enter-pip" disabled>1. Enter PiP (stream A 640×360)</button>
+      <button id="swap-b" disabled>2. Swap to stream B (640×360, same size)</button>
+      <button id="swap-c" disabled>3. Swap to stream C (960×540, same aspect)</button>
+      <button id="swap-d" disabled>4. Swap to stream D (480×480, new aspect)</button>
+      <button id="exit-pip" disabled>5. Exit PiP</button>
+    </div>
+
+    <p>Video state: <output id="state">waiting for metadata</output></p>
+    <pre id="log"></pre>
+  </main>
+
+  <script>
+    'use strict';
+
+    const video = document.getElementById('video');
+    const enterButton = document.getElementById('enter-pip');
+    const exitButton = document.getElementById('exit-pip');
+    const stateOutput = document.getElementById('state');
+    const logOutput = document.getElementById('log');
+    const swapButtons = [
+      document.getElementById('swap-b'),
+      document.getElementById('swap-c'),
+      document.getElementById('swap-d')
+    ];
+
+    function appendLog(message) {
+      logOutput.textContent += message + '\n';
+    }
+
+    function createTestStream(width, height, color, label) {
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+
+      const context = canvas.getContext('2d');
+      let frame = 0;
+
+      function drawFrame() {
+        frame += 1;
+        context.fillStyle = color;
+        context.fillRect(0, 0, width, height);
+        context.fillStyle = '#fff';
+        context.font = '48px sans-serif';
+        context.fillText(label + ' ' + frame, 40, height / 2);
+      }
+
+      drawFrame();
+      setInterval(drawFrame, 100);
+      return canvas.captureStream(10);
+    }
+
+    const streams = {
+      A: createTestStream(640, 360, '#06c', 'A'),
+      B: createTestStream(640, 360, '#c30', 'B'),
+      C: createTestStream(960, 540, '#083', 'C'),
+      D: createTestStream(480, 480, '#849', 'D')
+    };
+
+    function isInPictureInPicture() {
+      return document.pictureInPictureElement === video;
+    }
+
+    function updateState(prefix) {
+      const naturalSize = video.videoWidth && video.videoHeight
+        ? video.videoWidth + '×' + video.videoHeight
+        : 'metadata unavailable';
+
+      stateOutput.textContent =
+        prefix + '; natural size=' + naturalSize +
+        '; inPiP=' + isInPictureInPicture();
+    }
+
+    function setControls(inPictureInPicture) {
+      enterButton.disabled =
+        inPictureInPicture || !document.pictureInPictureEnabled;
+      swapButtons.forEach((button) => {
+        button.disabled = !inPictureInPicture;
+      });
+      exitButton.disabled = !inPictureInPicture;
+    }
+
+    function waitForMediaEvent(eventName, timeoutMilliseconds = 5000) {
+      return new Promise((resolve, reject) => {
+        function handleEvent() {
+          clearTimeout(timeout);
+          resolve();
+        }
+
+        const timeout = setTimeout(() => {
+          video.removeEventListener(eventName, handleEvent);
+          reject(new Error('timed out waiting for ' + eventName));
+        }, timeoutMilliseconds);
+
+        video.addEventListener(eventName, handleEvent, { once: true });
+      });
+    }
+
+    function createSwapHandler(stream, name, expectedWidth, expectedHeight) {
+      return async () => {
+        swapButtons.forEach((button) => {
+          button.disabled = true;
+        });
+
+        try {
+          const metadataReady = waitForMediaEvent('loadedmetadata');
+          video.srcObject = stream;
+          await metadataReady;
+          await video.play();
+
+          if (
+            video.videoWidth !== expectedWidth ||
+            video.videoHeight !== expectedHeight
+          ) {
+            throw new Error(
+              'expected ' + expectedWidth + '×' + expectedHeight +
+              ', got ' + video.videoWidth + '×' + video.videoHeight
+            );
+          }
+
+          updateState('swapped to stream ' + name);
+          appendLog(
+            'verified stream ' + name + ': ' +
+            video.videoWidth + '×' + video.videoHeight +
+            '; inPiP=' + isInPictureInPicture()
+          );
+        } catch (error) {
+          appendLog(
+            'swap to ' + name + ' failed: ' + error.name + ' ' + error.message
+          );
+        } finally {
+          setControls(isInPictureInPicture());
+        }
+      };
+    }
+
+    video.addEventListener('loadedmetadata', () => {
+      enterButton.disabled = !document.pictureInPictureEnabled;
+      updateState('stream A ready');
+      appendLog('stream A ready: ' + video.videoWidth + '×' + video.videoHeight);
+    }, { once: true });
+
+    video.addEventListener('resize', () => {
+      updateState('video resize event');
+      appendLog('natural size now ' + video.videoWidth + '×' + video.videoHeight);
+    });
+
+    video.addEventListener('enterpictureinpicture', () => {
+      setControls(true);
+      updateState('PiP entered');
+      appendLog('PiP entered');
+    });
+
+    video.addEventListener('leavepictureinpicture', () => {
+      setControls(false);
+      updateState('left PiP');
+      appendLog('left PiP');
+    });
+
+    enterButton.addEventListener('click', async () => {
+      try {
+        await video.play();
+        await video.requestPictureInPicture();
+      } catch (error) {
+        appendLog('PiP failed: ' + error.name + ' ' + error.message);
+      }
+    });
+
+    exitButton.addEventListener('click', async () => {
+      try {
+        await document.exitPictureInPicture();
+      } catch (error) {
+        appendLog('exit failed: ' + error.name + ' ' + error.message);
+      }
+    });
+
+    document.getElementById('swap-b').addEventListener(
+      'click',
+      createSwapHandler(streams.B, 'B', 640, 360)
+    );
+    document.getElementById('swap-c').addEventListener(
+      'click',
+      createSwapHandler(streams.C, 'C', 960, 540)
+    );
+    document.getElementById('swap-d').addEventListener(
+      'click',
+      createSwapHandler(streams.D, 'D', 480, 480)
+    );
+
+    video.srcObject = streams.A;
+  </script>
+</body>
+</html>

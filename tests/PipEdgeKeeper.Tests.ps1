@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-$scriptPath = Join-Path $PSScriptRoot '..\Keep-PipAtEdge.ps1'
+$scriptPath = Join-Path $PSScriptRoot '..\PipEdgeKeeper.ps1'
 
 . $scriptPath -Once 6>$null
 

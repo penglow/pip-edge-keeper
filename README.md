@@ -1,5 +1,7 @@
 # Chromium PiP Edge Keeper
 
+[![Tests](https://github.com/penglow/pip-edge-keeper/actions/workflows/test.yml/badge.svg)](https://github.com/penglow/pip-edge-keeper/actions/workflows/test.yml)
+
 Windows helper that keeps Chromium Picture-in-Picture windows attached to the
 screen edge when autoplay or media updates move them inward.
 
@@ -11,7 +13,7 @@ screen edge when autoplay or media updates move them inward.
 
 The launcher snaps to the physical monitor edge, so a bottom-anchored PiP can
 overlap the taskbar. To stop at the top of the taskbar instead, run
-`Keep-PipAtEdge.ps1` directly without `-UseMonitorBounds`.
+`PipEdgeKeeper.ps1` directly without `-UseMonitorBounds`.
 
 Chrome, Vivaldi, Edge, Brave, Chromium, Opera, and Opera GX are supported by
 default. The helper only repositions matching PiP windows; it does not resize
@@ -23,14 +25,15 @@ them, modify browser files, install anything, or require administrator access.
 python -m http.server 8000
 ```
 
-Open <http://localhost:8000/pip-drift-test.html>, enter PiP, place it flush with
-an edge, and use the stream-swap buttons.
+Open <http://localhost:8000/repro/pip-drift-test.html>, enter PiP, place it flush
+with an edge, and use the stream-swap buttons.
 
 ## Test
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File .\tests\Test-PipEdgeKeeper.ps1
+  -File .\tests\PipEdgeKeeper.Tests.ps1
 ```
 
-Chromium issue drafts and technical notes are in [`docs/`](docs/).
+The Chromium bug report and technical analysis are in
+[`docs/chromium-bug-report.md`](docs/chromium-bug-report.md).

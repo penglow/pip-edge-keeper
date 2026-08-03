@@ -1,0 +1,29 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Run placement tests
+        shell: powershell
+        run: .\tests\run-tests.ps1
+      - name: Build tray application
+        shell: powershell
+        run: .\build.ps1
+      - name: Package Windows application
+        shell: powershell
+        run: Compress-Archive -Path .\dist\PipEdgeKeeper.exe -DestinationPath .\dist\PipEdgeKeeper-windows.zip -Force
+      - name: Publish GitHub release
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$env:GITHUB_REF_NAME" .\dist\PipEdgeKeeper-windows.zip --verify-tag --generate-notes --title "PiP Edge Keeper $env:GITHUB_REF_NAME"

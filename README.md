@@ -1,42 +1,50 @@
 # Chromium PiP Edge Keeper
 
-[![Tests](https://github.com/penglow/pip-edge-keeper/actions/workflows/test.yml/badge.svg)](https://github.com/penglow/pip-edge-keeper/actions/workflows/test.yml)
+[![Build and test](https://github.com/penglow/pip-edge-keeper/actions/workflows/test.yml/badge.svg)](https://github.com/penglow/pip-edge-keeper/actions/workflows/test.yml)
 
-Windows helper that keeps Chromium Picture-in-Picture windows attached to the
-screen edge when autoplay or media updates move them inward.
+A small Windows tray app that keeps Chromium Picture-in-Picture windows attached
+to the screen edge when autoplay or media updates move them inward.
 
 ## Run
 
-1. Double-click `Start-PipEdgeKeeper.cmd`.
-2. Place the PiP window within 64 pixels of an edge or corner.
-3. Right-click its notification-area icon and choose **Exit** when finished.
+Download the `PipEdgeKeeper-windows` artifact from the
+[latest successful build](https://github.com/penglow/pip-edge-keeper/actions/workflows/test.yml),
+extract it, and run `PipEdgeKeeper.exe`.
 
-The launcher runs silently in the background and prevents duplicate instances.
-Run `PipEdgeKeeper.ps1` directly if you want a visible console for debugging.
+The app has no terminal or taskbar window. It lives in the Windows notification
+area:
 
-The launcher snaps to the physical monitor edge, so a bottom-anchored PiP can
-overlap the taskbar. To stop at the top of the taskbar instead, run
-`PipEdgeKeeper.ps1` directly without `-UseMonitorBounds`.
+- Double-click the icon to open settings.
+- Right-click it to pause, open settings, or exit.
+- Starting it twice does not create duplicate instances.
 
-Chrome, Vivaldi, Edge, Brave, Chromium, Opera, and Opera GX are supported by
-default. The helper only repositions matching PiP windows; it does not resize
-them, modify browser files, install anything, or require administrator access.
+Windows may show a SmartScreen warning because the executable is not
+code-signed.
 
-## Reproduce the Chromium bug
+## Settings
+
+The settings window controls the edge recognition distance, whether recognized
+edges snap completely flush, and whether bottom PiP windows use the physical
+screen edge or stop above the taskbar.
+
+Settings are stored in `%LOCALAPPDATA%\PipEdgeKeeper\settings.ini`.
+
+## Build
+
+Windows 10 or 11 includes the .NET Framework compiler used by this project:
 
 ```powershell
-python -m http.server 8000
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\build.ps1
 ```
 
-Open <http://localhost:8000/repro/pip-drift-test.html>, enter PiP, place it flush
-with an edge, and use the stream-swap buttons.
+The executable is written to `dist\PipEdgeKeeper.exe`.
 
 ## Test
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File .\tests\PipEdgeKeeper.Tests.ps1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\tests\run-tests.ps1
 ```
 
-The Chromium bug report and technical analysis are in
-[`docs/chromium-bug-report.md`](docs/chromium-bug-report.md).
+The Chromium bug analysis and deterministic reproduction page remain in
+[`docs/chromium-bug-report.md`](docs/chromium-bug-report.md) and
+[`repro/pip-drift-test.html`](repro/pip-drift-test.html).
